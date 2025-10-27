@@ -7,7 +7,7 @@ Tiny workspace with multiple inference backends: `candle-inf`, `llamacpp-inf`, a
 ## Clone with submodules
 
 ```bash
-git clone --recursive <your-repo-url>
+git clone --recursive [<your-repo-url>](https://github.com/Slicky325/SL5-inference.git)
 # or if already cloned:
 git submodule update --init --recursive
 ```
