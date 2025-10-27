@@ -1,0 +1,9 @@
+[submodule "llamacpp-inf/llama.cpp"]
+	path = llamacpp-inf/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
+[submodule "candle-inf/candle"]
+	path = candle-inf/candle
+	url = https://github.com/huggingface/candle.git
+[submodule "mistral.rs-inf/mistral.rs"]
+	path = mistral.rs-inf/mistral.rs
+	url = https://github.com/EricLBuehler/mistral.rs.git

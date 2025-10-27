@@ -1,0 +1,44 @@
+# Build artifacts
+target/
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Rust
+Cargo.lock
+**/*.rs.bk
+
+# C/C++
+*.out
+*.obj
+*.lib
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+# Keys and secrets
+*.pem
+*.key
+*.crt
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and temp files
+*.log
+tmp/
+temp/
