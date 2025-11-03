@@ -38,8 +38,9 @@ llamacpp-inf/
 ```bash
 g++ -std=c++17 -O3 base-inf.cpp -o base-inf \
     -I./llama.cpp/include \
-    -L./llama.cpp/build/src \
-    -lllama -lggml \
+    -I./llama.cpp/ggml/include \
+    -L./llama.cpp/build/bin \
+    -lllama -lggml -lggml-base -lggml-cpu \
     -pthread
 ```
 
@@ -59,6 +60,11 @@ cmake --build . --target base-inf
 ```
 
 ## Running the Script
+
+**Important:** Before running, set the library path:
+```bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./llama.cpp/build/bin
+```
 
 ### Basic usage:
 ```bash
@@ -106,7 +112,7 @@ cmake --build . --target base-inf
 
 **Library not found:**
 ```bash
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./llama.cpp/build/src
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./llama.cpp/build/bin
 ```
 
 **Cannot find llama.h:**

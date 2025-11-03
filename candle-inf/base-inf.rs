@@ -11,15 +11,16 @@ extern crate intel_mkl_src;
 use anyhow::{bail, Result};
 use clap::Parser;
 
-use candle::{DType, Device, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::models::llama as model;
 use hf_hub::{api::sync::Api, Repo, RepoType};
-use model::{Llama, LlamaConfig};
+use model::{Llama, Config};
 use tokenizers::Tokenizer;
 
 use std::io::Write;
+use std::path::PathBuf;
 
 const EOS_TOKEN: &str = "</s>";
 const DEFAULT_PROMPT: &str = "Hello, my name is";
@@ -31,9 +32,13 @@ const DEFAULT_PROMPT: &str = "Hello, my name is";
     long_about = "A simple script to run LLM inference using the Candle framework"
 )]
 struct Args {
-    /// Model ID from HuggingFace Hub (e.g., "meta-llama/Llama-2-7b-hf")
+    /// Model ID from HuggingFace Hub (e.g., "meta-llama/Llama-2-7b-hf") or local path
     #[arg(short = 'm', long)]
     model_id: String,
+
+    /// Use local model directory instead of downloading from HuggingFace
+    #[arg(long)]
+    local: bool,
 
     /// The initial prompt for text generation
     #[arg(short = 'p', long, default_value = DEFAULT_PROMPT)]
@@ -111,23 +116,50 @@ fn main() -> Result<()> {
         dtype => bail!("Unsupported dtype: {}", dtype),
     };
 
-    // Download model from HuggingFace Hub
-    println!("Downloading model files from HuggingFace Hub...");
-    let api = Api::new()?;
-    let repo = api.repo(Repo::with_revision(
-        args.model_id.clone(),
-        RepoType::Model,
-        args.revision.unwrap_or("main".to_string()),
-    ));
+    // Load model files (from local directory or HuggingFace Hub)
+    let (tokenizer_filename, config_filename, weights_filename) = if args.local {
+        println!("Loading model from local directory: {}", args.model_id);
+        let model_dir = PathBuf::from(&args.model_id);
+        
+        let tokenizer = model_dir.join("tokenizer.json");
+        let config = model_dir.join("config.json");
+        let weights = if model_dir.join("model.safetensors").exists() {
+            model_dir.join("model.safetensors")
+        } else if model_dir.join("model-00001-of-00002.safetensors").exists() {
+            // Handle sharded models - we'll need to adjust VarBuilder later
+            bail!("Sharded models not yet supported in this script. Please use a single safetensors file.");
+        } else {
+            bail!("No model.safetensors found in {}", args.model_id);
+        };
+        
+        if !tokenizer.exists() || !config.exists() || !weights.exists() {
+            bail!(
+                "Missing required files in {}. Need: tokenizer.json, config.json, and model.safetensors",
+                args.model_id
+            );
+        }
+        
+        println!("Found local model files!\n");
+        (tokenizer, config, weights)
+    } else {
+        println!("Downloading model files from HuggingFace Hub...");
+        let api = Api::new()?;
+        let repo = api.repo(Repo::with_revision(
+            args.model_id.clone(),
+            RepoType::Model,
+            args.revision.unwrap_or("main".to_string()),
+        ));
 
-    let tokenizer_filename = repo.get("tokenizer.json")?;
-    let config_filename = repo.get("config.json")?;
-    let weights_filename = repo.get("model.safetensors").or_else(|_| {
-        println!("model.safetensors not found, trying pytorch_model.bin...");
-        repo.get("pytorch_model.bin")
-    })?;
+        let tokenizer = repo.get("tokenizer.json")?;
+        let config = repo.get("config.json")?;
+        let weights = repo.get("model.safetensors").or_else(|_| {
+            println!("model.safetensors not found, trying pytorch_model.bin...");
+            repo.get("pytorch_model.bin")
+        })?;
 
-    println!("Model files downloaded successfully!\n");
+        println!("Model files downloaded successfully!\n");
+        (tokenizer, config, weights)
+    };
 
     // Load tokenizer
     println!("Loading tokenizer...");
@@ -137,8 +169,28 @@ fn main() -> Result<()> {
 
     // Load config
     println!("Loading model config...");
-    let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename)?)?;
-    println!("Config loaded: {:?}\n", config);
+    let config_json: serde_json::Value = serde_json::from_slice(&std::fs::read(config_filename)?)?;
+    
+    // Build Config manually from JSON
+    let config = Config {
+        hidden_size: config_json["hidden_size"].as_u64().unwrap_or(4096) as usize,
+        intermediate_size: config_json["intermediate_size"].as_u64().unwrap_or(11008) as usize,
+        vocab_size: config_json["vocab_size"].as_u64().unwrap_or(32000) as usize,
+        num_hidden_layers: config_json["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
+        num_attention_heads: config_json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
+        num_key_value_heads: config_json["num_key_value_heads"]
+            .as_u64()
+            .or_else(|| config_json["num_attention_heads"].as_u64())
+            .unwrap_or(32) as usize,
+        rms_norm_eps: config_json["rms_norm_eps"].as_f64().unwrap_or(1e-5),
+        rope_theta: config_json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,
+        use_flash_attn: false, // Set to false for compatibility
+    };
+    
+    println!("Config loaded!");
+    println!("  - Hidden size: {}", config.hidden_size);
+    println!("  - Layers: {}", config.num_hidden_layers);
+    println!("  - Vocab size: {}\n", config.vocab_size);
 
     // Load model weights
     println!("Loading model weights...");
@@ -146,7 +198,7 @@ fn main() -> Result<()> {
         VarBuilder::from_mmaped_safetensors(&[weights_filename], dtype, &device)?
     };
 
-    let cache = model::Cache::new(!args.no_kv_cache, dtype, &config, &device)?;
+    let mut cache = model::Cache::new(!args.no_kv_cache, dtype, &config, &device)?;
     let llama = Llama::load(vb, &config)?;
     println!("Model loaded successfully!\n");
 
@@ -192,7 +244,7 @@ fn main() -> Result<()> {
         let start_token = std::time::Instant::now();
 
         // Forward pass through the model
-        let logits = llama.forward(&tokens_tensor, pos, &cache)?;
+        let logits = llama.forward(&tokens_tensor, pos, &mut cache)?;
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
 
         // Apply repeat penalty

@@ -1,5 +1,5 @@
 // Basic LLM Inference Script using llama.cpp
-// Compile: g++ -std=c++17 -O3 base-inf.cpp -o base-inf -I./llama.cpp/include -L./llama.cpp/build/src -lllama -lggml
+// Compile: g++ -std=c++17 -O3 base-inf.cpp -o base-inf -I./llama.cpp/include -I./llama.cpp/ggml/include -L./llama.cpp/build/bin -lllama -lggml -lggml-base -lggml-cpu -pthread
 // Or use CMake from llama.cpp directory
 
 #include "llama.h"
